@@ -76,6 +76,8 @@ const char *Z_NumberStringPointer( int iNum )
 	return ( const char * )numberstring[ iNum - '0' ].mem;
 }
 
+#ifndef _DEBUG_MEM
+
 /*
 ========================
 Z_Free
@@ -95,7 +97,7 @@ void Z_Free( void *ptr )
 	}
 
 	// check the memory trash tester
-	if( *( int * )( ( byte * )block + block->size - 4 ) != ZONEID ) {
+	if( *( int * )( ( byte * )block + block->size - sizeof( int ) ) != ZONEID ) {
 		Com_Error( ERR_FATAL, "Z_Free: memory block wrote past end" );
 	}
 
@@ -107,6 +109,8 @@ void Z_Free( void *ptr )
 	// free the block
 	free( block );
 }
+
+#endif
 
 /*
 ========================
@@ -127,6 +131,8 @@ void Z_FreeTags( int tag )
 	mem_blocks[ tag ].prev = &mem_blocks[ tag ];
 	mem_blocks[ tag ].next = &mem_blocks[ tag ];
 }
+
+#ifndef _DEBUG_MEM
 
 /*
 ========================
@@ -149,7 +155,7 @@ void *Z_TagMalloc( size_t size, int tag )
 	}
 
 	size += sizeof( memblock_t );				// account for size of block header
-	size += 4;									// space for memory trash tester
+	size += sizeof( int );						// space for memory trash tester
 	size = PAD( size, sizeof( intptr_t ) );		// align to 32/64 bit boundary
 
 	block = ( memblock_t * )malloc( size );
@@ -161,10 +167,12 @@ void *Z_TagMalloc( size_t size, int tag )
 	mem_blocks[ tag ].prev = block;
 
 	// marker for memory trash testing
-	*( int * )( ( byte * )block + block->size - 4 ) = ZONEID;
+	*( int * )( ( byte * )block + block->size - sizeof( int ) ) = ZONEID;
 
 	return ( void * )( ( byte * )block + sizeof( memblock_t ) );
 }
+
+#endif
 
 /*
 ========================
@@ -328,7 +336,7 @@ Z_InitMemory
 void Z_InitMemory( void ) {
 	int k;
 
-	memset( &mem_blocks, 0, 0x100 );
+	memset( &mem_blocks, 0, sizeof( mem_blocks ) );
 
 	for( k = 0; k < 16; k++ )
 	{
@@ -354,6 +362,8 @@ void Z_Shutdown( void ) {
 	}
 }
 
+#ifndef _DEBUG_MEM
+
 /*
 =================
 Hunk_Alloc
@@ -370,6 +380,8 @@ void *Hunk_Alloc( size_t size ) {
 	return ptr;
 }
 
+#endif
+
 /*
 =================
 Hunk_Clear
@@ -381,6 +393,8 @@ void Hunk_Clear( void ) {
 	Z_FreeTags( TAG_STATIC );
 }
 
+#ifndef _DEBUG_MEM
+
 /*
 =================
 Hunk_AllocateTempMemory
@@ -390,7 +404,7 @@ Multiple files can be loaded in temporary memory.
 When the files-in-use count reaches zero, all temp memory will be deleted
 =================
 */
-void *Hunk_AllocateTempMemory( int size ) {
+void *Hunk_AllocateTempMemory( size_t size ) {
 	return Z_TagMalloc( size, TAG_TEMP );
 }
 
@@ -402,6 +416,8 @@ Hunk_FreeTempMemory
 void Hunk_FreeTempMemory( void *ptr ) {
 	Z_Free( ptr );
 }
+
+#endif
 
 /*
 =================
@@ -438,6 +454,8 @@ void Com_TouchMemory( void ) {
 	Z_TouchMemory();
 }
 
+#ifndef _DEBUG_MEM
+
 /*
 ========================
 Z_Malloc
@@ -451,3 +469,5 @@ void *Z_Malloc( size_t size ) {
 
 	return ptr;
 }
+
+#endif

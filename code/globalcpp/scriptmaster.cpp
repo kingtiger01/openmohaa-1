@@ -85,6 +85,8 @@ ScriptEvent scriptedEvents[ SE_MAX ];
 
 MEM_BlockAlloc< ScriptThread, MEM_BLOCKSIZE > ScriptThread_allocator;
 
+FlagList flags;
+
 CLASS_DECLARATION( Class, ScriptEvent, NULL )
 {
 	{ NULL, NULL }
@@ -3170,6 +3172,7 @@ void ScriptMaster::RegisterAliasInternal
 	{
 		str s;
 
+		// MOHAA doesn't check that
 		if( ev->IsListenerAt( i ) )
 		{
 			Listener *l = ev->GetListener( i );
@@ -3284,14 +3287,25 @@ ScriptThread::ScriptThread( ScriptClass *scriptClass, unsigned char *pCodePos )
 
 ScriptThread::~ScriptThread()
 {
-	if( !m_ScriptVM )
+	ScriptVM* vm = m_ScriptVM;
+	if( !vm )
 	{
 		ScriptError( "Attempting to delete a dead thread." );
 	}
 
-	Stop();
+	m_ScriptVM = NULL;
+	if( vm->ThreadState() == THREAD_WAITING )
+	{
+		vm->m_ThreadState = THREAD_RUNNING;
+		Director.RemoveTiming( this );
+	}
+	else if( vm->ThreadState() == THREAD_SUSPENDED )
+	{
+		vm->m_ThreadState = THREAD_RUNNING;
+		CancelWaitingAll();
+	}
 
-	m_ScriptVM->NotifyDelete();
+	vm->NotifyDelete();
 }
 
 void ScriptThread::CreateReturnThread
@@ -3836,8 +3850,8 @@ void ScriptThread::FileReadAll
 	FILE *f = NULL;
 	char *ret = NULL;
 	long currentPos = 0;
-	long size = 0;
-	long sizeRead = 0;
+	size_t size = 0;
+	size_t sizeRead = 0;
 
 	numArgs = ev->NumArgs();
 
@@ -3879,7 +3893,7 @@ void ScriptThread::FileSaveAll
 	int id = 0;
 	int numArgs = 0;
 	FILE *f = NULL;
-	long sizeWrite = 0;
+	size_t sizeWrite = 0;
 	str text;
 
 	numArgs = ev->NumArgs();
@@ -3901,7 +3915,7 @@ void ScriptThread::FileSaveAll
 
 	sizeWrite = fwrite( text, 1, strlen( text ), f );
 
-	ev->AddInteger( sizeWrite );
+	ev->AddInteger( ( int )sizeWrite );
 }
 
 void ScriptThread::FileRemove
@@ -3973,7 +3987,7 @@ void ScriptThread::FileCopy
 	)
 
 {
-	unsigned int n = 0;
+	size_t n = 0;
 	int numArgs = 0;
 	unsigned int ret = 0;
 	str filename, copyfilename;
@@ -4361,9 +4375,9 @@ void ScriptThread::PregMatch
 {
 	slre_cap sl_cap[ 32 ];
 	int i, j;
-	int iMaxLength;
-	int iLength;
-	int iFoundLength = 0;
+	size_t iMaxLength;
+	size_t iLength;
+	size_t iFoundLength = 0;
 	str pattern, subject;
 	ScriptVariable index, value, subindex, subvalue;
 	ScriptVariable array, subarray;
@@ -4438,7 +4452,18 @@ void ScriptThread::FlagClear
 	)
 
 {
-	// FIXME: TODO
+	str name;
+	Flag *flag;
+
+	name = ev->GetString(1);
+
+	flag = flags.FindFlag(name);
+
+	if (flag == NULL) {
+		ScriptError("Invalid flag '%s'\n", name.c_str());
+	}
+
+	delete flag;
 }
 
 void ScriptThread::FlagInit
@@ -4447,7 +4472,22 @@ void ScriptThread::FlagInit
 	)
 
 {
-	// FIXME: TODO
+	str name;
+	Flag *flag;
+
+	name = ev->GetString(1);
+
+	flag = flags.FindFlag(name);
+
+	if (flag != NULL)
+	{
+		flag->Reset();
+		return;
+	}
+
+	flag = new Flag;
+	flag->bSignaled = false;
+	strcpy(flag->flagName, name);
 }
 
 void ScriptThread::FlagSet
@@ -4456,7 +4496,18 @@ void ScriptThread::FlagSet
 	)
 
 {
-	// FIXME: TODO
+	str name;
+	Flag *flag;
+
+	name = ev->GetString(1);
+
+	flag = flags.FindFlag(name);
+
+	if (flag == NULL) {
+		ScriptError("Invalid flag '%s'.\n", name.c_str());
+	}
+
+	flag->Set();
 }
 
 void ScriptThread::FlagWait
@@ -4465,7 +4516,18 @@ void ScriptThread::FlagWait
 	)
 
 {
-	// FIXME: TODO
+	str name;
+	Flag *flag;
+
+	name = ev->GetString(1);
+
+	flag = flags.FindFlag(name);
+
+	if (flag == NULL) {
+		ScriptError("Invalid flag '%s'.\n", name.c_str());
+	}
+
+	flag->Wait(this);
 }
 
 void ScriptThread::Lock
@@ -5437,7 +5499,7 @@ void ScriptThread::Abs
 	)
 
 {
-	ev->AddFloat( abs( ev->GetFloat( 1 ) ) );
+	ev->AddFloat(fabs( ev->GetFloat( 1 ) ) );
 }
 
 void ScriptThread::ServerStufftext
@@ -9294,6 +9356,83 @@ void LightStyleClass::Archive( Archiver &arc )
 			gi.SetLightStyle( i, styles[ i ].c_str() );
 		}
 	}
+}
+
+
+Flag *FlagList::FindFlag(const char * name)
+{
+	for (int i = 0; i < m_Flags.NumObjects(); i++)
+	{
+		Flag * index = m_Flags[i];
+
+		// found the flag
+		if (strcmp(index->flagName, name) == 0) {
+			return index;
+		}
+	}
+
+	return NULL;
+}
+
+void FlagList::AddFlag(Flag *flag)
+{
+	m_Flags.AddObject(flag);
+}
+
+void FlagList::RemoveFlag(Flag *flag)
+{
+	m_Flags.RemoveObject(flag);
+}
+
+Flag::Flag()
+{
+	flags.AddFlag(this);
+}
+
+Flag::~Flag()
+{
+	flags.RemoveFlag(this);
+
+	m_WaitList.FreeObjectList();
+}
+
+void Flag::Reset()
+{
+	bSignaled = false;
+}
+
+void Flag::Set()
+{
+	// Don't signal again
+	if (bSignaled) {
+		return;
+	}
+
+	bSignaled = true;
+
+	for (int i = 0; i < m_WaitList.NumObjects(); i++)
+	{
+		ScriptVM *Thread = m_WaitList[i];
+
+		if (Thread->state != STATE_DESTROYED && Thread->m_Thread != NULL) {
+			Thread->m_Thread->StoppedWaitFor(STRING_EMPTY, false);
+		}
+	}
+
+	// Clear the list
+	m_WaitList.FreeObjectList();
+}
+
+void Flag::Wait(ScriptThread *Thread)
+{
+	// Don't wait if it's signaled
+	if (bSignaled) {
+		return;
+	}
+
+	Thread->StartedWaitFor();
+
+	m_WaitList.AddObject(Thread->m_ScriptVM);
 }
 
 #endif

@@ -72,7 +72,8 @@ SV_SetConfigstring
 ===============
 */
 void SV_SetConfigstring (int index, const char *val) {
-	int		len, i;
+	int i;
+	size_t len;
 	client_t	*client;
 
 	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
@@ -259,13 +260,13 @@ given client
 static void SV_SendConfigstring(client_t *client, int index)
 {
 	int maxChunkSize = MAX_STRING_CHARS - 24;
-	int len;
+	size_t len;
 
 	len = strlen(sv.configstrings[index]);
 
 	if( len >= maxChunkSize ) {
 		int		sent = 0;
-		int		remaining = len;
+		size_t	remaining = len;
 		char	*cmd;
 		char	buf[MAX_STRING_CHARS];
 
@@ -459,7 +460,7 @@ void SV_ChangeMaxClients( void ) {
 
 	// get the highest client number in use
 	count = 0;
-	for ( i = 0 ; i < sv_maxclients->integer ; i++ ) {
+	for ( i = 0 ; i < svs.iNumClients ; i++ ) {
 		if ( svs.clients[i].state >= CS_CONNECTED ) {
 			if (i > count)
 				count = i;

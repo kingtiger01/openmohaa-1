@@ -2534,6 +2534,7 @@ Event EV_VehiclePoint_SetSpawnFlags
 CLASS_DECLARATION( Waypoint, VehiclePoint, NULL )
 {
 	{ &EV_VehiclePoint_SetSpawnFlags,				&VehiclePoint::SetSpawnFlags },
+	{ NULL, NULL }
 };
 
 void VehiclePoint::SetSpawnFlags
@@ -3667,8 +3668,8 @@ void FuncLadder::EnsureOverLadder( Entity *pUser )
 	if( trace.startsolid || trace.allsolid )
 	{
 		trace = G_Trace( origin,
-			mins,
-			maxs,
+			pUser->mins,
+			pUser->maxs,
 			vPos,
 			pUser->edict,
 			MASK_PLAYERSOLID,

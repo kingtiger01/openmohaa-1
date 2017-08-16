@@ -29,6 +29,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <con_set.h>
 #include "tiki_files.h"
 #include "tiki_skel.h"
+#include "dbgheap.h"
 
 struct pchar {
 	const char *m_Value;
@@ -263,12 +264,14 @@ void TIKI_FreeAll()
 			}
 
 			tiki->m_boneList.CleanUpChannels();
+			/*
 			if( tiki->a->m_aliases )
 			{
 				TIKI_Free( tiki->a->m_aliases );
 				tiki->a->m_aliases = NULL;
 				tiki->a->num_anims = 0;
 			}
+			*/
 
 			TIKI_Free( tiki );
 		}
@@ -285,6 +288,14 @@ void TIKI_FreeAll()
 			tikianim = *entryanim;
 
 			TIKI_RemoveTiki( tikianim );
+
+			if( tikianim->m_aliases )
+			{
+				TIKI_Free( tikianim->m_aliases );
+				tikianim->m_aliases = NULL;
+				tikianim->num_anims = 0;
+			}
+
 			TIKI_Free( tikianim );
 		}
 
@@ -294,8 +305,12 @@ void TIKI_FreeAll()
 	tiki_loading = true;
 	if( skelcache )
 	{
-		for( i = 0; i < cache_maxskel; i++ ) {
-			TIKI_FreeSkel( i );
+		for( i = 0; i < cache_maxskel; i++ )
+		{
+			if (skelcache->skel)
+			{
+				TIKI_FreeSkel(i);
+			}
 		}
 	}
 }

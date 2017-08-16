@@ -29,6 +29,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../client/client.h"
 #include <tiki.h>
 #include <mem_tempalloc.h>
+#include "dbgheap.h"
 
 qboolean	tiki_loading;
 cvar_t		*dumploadedanims;
@@ -132,7 +133,7 @@ dtikianim_t *TIKI_LoadTikiAnim( const char *path )
 		token = loaddef.tikiFile.GetToken( true );
 		if( strcmp( token, "TIKI" ) )
 		{
-			TIKI_Error( "TIKI_LoadTIKIfile: def file %s has wrong header (%s should be TIKI)\n", loaddef.tikiFile.Filename() );
+			TIKI_Error( "TIKI_LoadTIKIfile: def file %s has wrong header (%s should be TIKI)\n", loaddef.tikiFile.Filename(), token );
 			loaddef.tikiFile.Close();
 			return NULL;
 		}
@@ -436,7 +437,7 @@ skelAnimDataGameHeader_t *SkeletorCacheFileCallback( const char *path )
 	char tempName[ 100 ];
 	char extension[ 100 ];
 	skelAnimDataGameHeader_t *finishedHeader;
-	void *buffer;
+	char *buffer;
 	char npath[ 256 ];
 
 	Skel_ExtractFileExtension( path, extension );
@@ -464,7 +465,7 @@ skelAnimDataGameHeader_t *SkeletorCacheFileCallback( const char *path )
 			return NULL;
 		}
 
-		if( pHeader->ident != TIKI_SKC_HEADER_IDENT || pHeader->version != TIKI_SKC_HEADER_VERSION )
+		if( pHeader->ident != TIKI_SKC_HEADER_IDENT || ( pHeader->version != TIKI_SKC_HEADER_OLD_VERSION && pHeader->version != TIKI_SKC_HEADER_VERSION ) )
 		{
 			Com_Printf( "Skeletor CacheAnimSkel: anim %s has wrong header ([ident,version] = [%i,%i] should be [%i,%i])\n", path,
 				pHeader->ident, pHeader->version,
@@ -473,11 +474,25 @@ skelAnimDataGameHeader_t *SkeletorCacheFileCallback( const char *path )
 			return NULL;
 		}
 
-		Com_Printf( "WARNING- DOWNGRADING TO OLD ANIMATION FORMAT FOR FILE: %s\n", path );
-		finishedHeader = skeletor_c::ConvertSkelFileToGame( pHeader, iBuffLength, path );
-		if( convertAnims && convertAnims->integer )
+		if( pHeader->version == TIKI_SKC_HEADER_OLD_VERSION )
 		{
-			skeletor_c::SaveProcessedAnim( finishedHeader, path, pHeader );
+			Com_Printf( "WARNING- DOWNGRADING TO OLD ANIMATION FORMAT FOR FILE: %s\n", path );
+			finishedHeader = skeletor_c::ConvertSkelFileToGame( pHeader, iBuffLength, path );
+			if( convertAnims && convertAnims->integer )
+			{
+				skeletor_c::SaveProcessedAnim( finishedHeader, path, pHeader );
+			}
+		}
+		else
+		{
+			// looks like SKC version 14 and above are processed animations
+
+			// points the buffer to the animation data
+			buffer = ( char * )pHeader + sizeof( int ) + sizeof( int );
+			iBuffLength -= sizeof( int ) + sizeof( int );
+
+			// loads the processed animation
+			finishedHeader = skeletor_c::LoadProcessedAnimEx( path, buffer, iBuffLength, path );
 		}
 
 		TIKI_FreeFile( pHeader );
@@ -501,6 +516,11 @@ SkeletorCacheGetData
 */
 skelAnimDataGameHeader_t *SkeletorCacheGetData( int index )
 {
+	if( index < 0 )
+	{
+		return NULL;
+	}
+
 	skelAnimDataGameHeader_t *data = m_cachedData[ index ].data;
 	if( !data )
 	{
@@ -626,6 +646,7 @@ void SkeletorCacheUnloadData( int index )
 
 	if( m_cachedData[ m_cachedDataLookup[ index ] ].data ) {
 		skelAnimDataGameHeader_s::DeallocAnimData( m_cachedData[ m_cachedDataLookup[ index ] ].data );
+		m_cachedData[ m_cachedDataLookup[ index ] ].data = NULL;
 	}
 
 	m_cachedData[ m_cachedDataLookup[ index ] ].lookup = -1;
@@ -645,7 +666,7 @@ void SkeletorCacheCleanCache()
 {
 	int i;
 
-	for( i = 0; i < m_numInCache; i++ )
+	for( i = m_numInCache - 1; i >= 0; i-- )
 	{
 		if( !m_cachedData[ m_cachedDataLookup[ i ] ].numusers ) {
 			SkeletorCacheUnloadData( i );
@@ -864,6 +885,7 @@ dtikianim_t *TIKI_InitTiki( dloaddef_t *ld, size_t defsize )
 			if( !SkeletorCacheLoadData( anim->name, bPrecache, index ) )
 			{
 				TIKI_Error( "TIKI_InitTiki: Failed to load animation '%s' at %s\n", anim->name, anim->location );
+				panim->m_aliases[ i ] = -1;
 				continue;
 			}
 		}
@@ -1023,6 +1045,6 @@ void TIKI_RemoveTiki( dtikianim_t *ptiki )
 	for( i = 0; i < ptiki->num_anims; i++ )
 	{
 		alias_index = ptiki->m_aliases[ i ];
-		m_cachedData[ i ].numusers--;
+		m_cachedData[ alias_index ].numusers--;
 	}
 }

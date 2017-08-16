@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <mem_blockalloc.h>
 #include <con_set.h>
 #include "tiki_files.h"
+#include "dbgheap.h"
 
 /*
 ===============
@@ -95,7 +96,14 @@ int TIKI_Anim_NumForName( dtiki_t *pmdl, const char *name )
 		iMiddle = ( iBottom + iTop ) / 2;
 
 		panimdef = pmdl->a->animdefs[ iMiddle ];
-		iComp = stricmp( panimdef->alias, name );
+		if( !panimdef )
+		{
+			iComp = -1;
+		}
+		else
+		{
+			iComp = stricmp( panimdef->alias, name );
+		}
 
 		if( !iComp )
 		{
@@ -106,7 +114,7 @@ int TIKI_Anim_NumForName( dtiki_t *pmdl, const char *name )
 
 			for( i = iMiddle; i > 0; i-- )
 			{
-				if( stricmp( panimdef->alias, pmdl->a->animdefs[ i - 1 ]->alias ) ) {
+				if( !pmdl->a->animdefs[ i - 1 ] || stricmp( panimdef->alias, pmdl->a->animdefs[ i - 1 ]->alias ) ) {
 					break;
 				}
 			}
@@ -115,7 +123,7 @@ int TIKI_Anim_NumForName( dtiki_t *pmdl, const char *name )
 
 			for( iMiddle++; iMiddle < pmdl->a->num_anims; iMiddle++ )
 			{
-				if( stricmp( panimdef->alias, pmdl->a->animdefs[ iMiddle ]->alias ) ) {
+				if( !pmdl->a->animdefs[ iMiddle ] || stricmp( panimdef->alias, pmdl->a->animdefs[ iMiddle ]->alias ) ) {
 					break;
 				}
 			}
@@ -126,6 +134,11 @@ int TIKI_Anim_NumForName( dtiki_t *pmdl, const char *name )
 			for( ; i < iMiddle; i++ )
 			{
 				panimdef = pmdl->a->animdefs[ i ];
+				if( !panimdef )
+				{
+					continue;
+				}
+
 				if( panimdef->flags & TAF_AUTOSTEPS_DOG )
 				{
 					fAnimWeights[ iAnimCount ] = 0.0f;
@@ -153,7 +166,7 @@ int TIKI_Anim_NumForName( dtiki_t *pmdl, const char *name )
 
 			iMiddle = i + k;
 			panimdef = pmdl->a->animdefs[ iMiddle ];
-			if( panimdef->flags & TAF_NOREPEAT )
+			if( panimdef && panimdef->flags & TAF_NOREPEAT )
 			{
 				panimdef->flags |= TAF_AUTOSTEPS_DOG;
 			}
@@ -161,13 +174,13 @@ int TIKI_Anim_NumForName( dtiki_t *pmdl, const char *name )
 			return iMiddle;
 		}
 
-		if( iComp <= 0 )
+		if( iComp > 0 )
 		{
-			iBottom = iMiddle + 1;
+			iTop = iMiddle - 1;
 		}
 		else
 		{
-			iTop = iMiddle - 1;
+			iBottom = iMiddle + 1;
 		}
 	}
 

@@ -202,6 +202,7 @@ static const unsigned pak_checksums[] = {
 typedef struct fileInPack_s {
 	char					*name;		// name of the file
 	unsigned long			pos;		// file info position in zip
+	unsigned long			len;		// uncompressed file size
 	struct	fileInPack_s*	next;		// next file in the hash
 } fileInPack_t;
 
@@ -275,6 +276,7 @@ typedef struct {
 	int			baseOffset;
 	int			fileSize;
 	int			zipFilePos;
+	int			zipFileLen;
 	qboolean	zipFile;
 	char		name[MAX_ZPATH];
 } fileHandleData_t;
@@ -436,7 +438,7 @@ FS_ReplaceSeparators
 Fix things up differently for win/unix/mac
 ====================
 */
-static void FS_ReplaceSeparators( char *path ) {
+void FS_ReplaceSeparators( char *path ) {
 	char	*s;
 
 	for ( s = path ; *s ; s++ ) {
@@ -1227,6 +1229,7 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 					// open the file in the zip
 					unzOpenCurrentFile( fsh[*file].handleFiles.file.z );
 					fsh[*file].zipFilePos = pakFile->pos;
+					fsh[*file].zipFileLen = pakFile->len;
 
 					if ( fs_debug->integer ) {
 						Com_Printf( "FS_FOpenFileRead: %s (found in '%s')\n",
@@ -1412,6 +1415,7 @@ FS_Seek
 =================
 */
 int FS_Seek( fileHandle_t f, long offset, fsOrigin_t origin ) {
+#if 0
 	int		_origin;
 
 	if ( !fs_searchpaths ) {
@@ -1504,6 +1508,97 @@ int FS_Seek( fileHandle_t f, long offset, fsOrigin_t origin ) {
 		}
 
 		return fseek( file, offset, _origin );
+	}
+#endif
+#else
+	int		_origin;
+
+	if (!fs_searchpaths) {
+		Com_Error(ERR_FATAL, "Filesystem call made without initialization");
+		return -1;
+	}
+
+	if (fsh[f].zipFile == qtrue) {
+		//FIXME: this is really, really crappy
+		//(but better than what was here before)
+		byte	buffer[PK3_SEEK_BUFFER_SIZE];
+		int		remainder;
+		int		currentPosition = FS_FTell(f);
+
+		// change negative offsets into FS_SEEK_SET
+		if (offset < 0) {
+			switch (origin) {
+			case FS_SEEK_END:
+				remainder = fsh[f].zipFileLen + offset;
+				break;
+
+			case FS_SEEK_CUR:
+				remainder = currentPosition + offset;
+				break;
+
+			case FS_SEEK_SET:
+			default:
+				remainder = 0;
+				break;
+			}
+
+			if (remainder < 0) {
+				remainder = 0;
+			}
+
+			origin = FS_SEEK_SET;
+		}
+		else {
+			if (origin == FS_SEEK_END) {
+				remainder = fsh[f].zipFileLen - currentPosition + offset;
+			}
+			else {
+				remainder = offset;
+			}
+		}
+
+		switch (origin) {
+		case FS_SEEK_SET:
+			if (remainder == currentPosition) {
+				return 0;
+			}
+			unzSetOffset(fsh[f].handleFiles.file.z, fsh[f].zipFilePos);
+			unzOpenCurrentFile(fsh[f].handleFiles.file.z);
+			//fallthrough
+
+		case FS_SEEK_END:
+		case FS_SEEK_CUR:
+			while (remainder > PK3_SEEK_BUFFER_SIZE) {
+				FS_Read(buffer, PK3_SEEK_BUFFER_SIZE, f);
+				remainder -= PK3_SEEK_BUFFER_SIZE;
+			}
+			FS_Read(buffer, remainder, f);
+			return 0;
+
+		default:
+			Com_Error(ERR_FATAL, "Bad origin in FS_Seek");
+			return -1;
+		}
+	}
+	else {
+		FILE *file;
+		file = FS_FileForHandle(f);
+		switch (origin) {
+		case FS_SEEK_CUR:
+			_origin = SEEK_CUR;
+			break;
+		case FS_SEEK_END:
+			_origin = SEEK_END;
+			break;
+		case FS_SEEK_SET:
+			_origin = SEEK_SET;
+			break;
+		default:
+			Com_Error(ERR_FATAL, "Bad origin in FS_Seek");
+			break;
+		}
+
+		return fseek(file, offset, _origin);
 	}
 #endif
 }
@@ -1904,7 +1999,9 @@ static pack_t *FS_LoadZipFile( char *zipfile, const char *basename )
 		strcpy( buildBuffer[i].name, filename_inzip );
 		namePtr += strlen(filename_inzip) + 1;
 		// store the file position in the zip
-		unzGetCurrentFileInfoPosition(uf, &buildBuffer[i].pos);
+		//unzGetCurrentFileInfoPosition(uf, &buildBuffer[i].pos);
+		buildBuffer[i].pos = unzGetOffset(uf);
+		buildBuffer[i].len = file_info.uncompressed_size;
 		//
 		buildBuffer[i].next = pack->hashTable[hash];
 		pack->hashTable[hash] = &buildBuffer[i];
@@ -2625,6 +2722,7 @@ void FS_AddGameDirectory( const char *path, const char *dir ) {
 		search = Z_Malloc (sizeof(searchpath_t));
 		search->pack = pak;
 		search->next = fs_searchpaths;
+		search->dir = NULL;
 		fs_searchpaths = search;
 	}
 
@@ -2636,6 +2734,7 @@ void FS_AddGameDirectory( const char *path, const char *dir ) {
 	//
 	search = Z_Malloc( sizeof( searchpath_t ) );
 	search->dir = Z_Malloc( sizeof( *search->dir ) );
+	search->pack = NULL;
 
 	Q_strncpyz( search->dir->path, path, sizeof( search->dir->path ) );
 	Q_strncpyz( search->dir->gamedir, dir, sizeof( search->dir->gamedir ) );
@@ -3433,7 +3532,8 @@ void FS_InitFilesystem( void ) {
 		// busted and error out now, rather than getting an unreadable
 		// graphics screen when the font fails to load
 		if( FS_ReadFile( "default.cfg", NULL ) <= 0 ) {
-			Com_Error( ERR_FATAL, "ERROR: Couldn't load default.cfg\n\n*********************************************\n**** PUT ORIGINAL MOHAA PAK*.PK3 FILES   ****\n**** AND SOUND DIRECTORY IN MAIN/ SUBDIR ****\n*********************************************\n" );
+			//Com_Error( ERR_FATAL, "ERROR: Couldn't load default.cfg\n\n*********************************************\n**** PUT ORIGINAL MOHAA PAK*.PK3 FILES   ****\n**** AND SOUND DIRECTORY IN MAIN/ SUBDIR ****\n*********************************************\n" );
+			Com_Error( ERR_FATAL, "ERROR: Couldn't load default.cfg\n\n*********************************************\n" );
 		}
 	}
 
@@ -3611,4 +3711,112 @@ void	FS_FilenameCompletion( const char *dir, const char *ext,
 		callback( filename );
 	}
 	FS_FreeFileList( filenames );
+}
+
+#define ABSOLUTE_NAME_START 3
+
+void FS_GetRelativeFilename( const char *currentDirectory, const char *absoluteFilename, char *out, size_t destlen )
+{
+	// declarations - put here so this should work in a C compiler
+	int afMarker = 0, rfMarker = 0;
+	size_t cdLen = 0, afLen = 0;
+	int i = 0;
+	int levels = 0;
+	cdLen = strlen( currentDirectory );
+	afLen = strlen( absoluteFilename );
+
+	// make sure the names are not too long or too short
+	if( cdLen > destlen || cdLen < ABSOLUTE_NAME_START + 1 ||
+		afLen > destlen || afLen < ABSOLUTE_NAME_START + 1 )
+	{
+		return;
+	}
+
+	// Handle DOS names that are on different drives:
+	if( currentDirectory[ 0 ] != absoluteFilename[ 0 ] )
+	{
+		// not on the same drive, so only absolute filename will do
+		strncpy( out, absoluteFilename, destlen );
+		return;
+	}
+
+	// they are on the same drive, find out how much of the current directory
+	// is in the absolute filename
+	i = ABSOLUTE_NAME_START;
+	while( i < afLen && i < cdLen )
+	{
+		if( currentDirectory[ i ] == absoluteFilename[ i ]
+			|| currentDirectory[ i ] == '\\' && absoluteFilename[ i ] == '/'
+			|| currentDirectory[ i ] == '/' && absoluteFilename[ i ] == '\\' )
+		{
+			i++;
+		}
+		else
+		{
+			break;
+		}
+	}
+	if( i == cdLen )
+	{
+		if( absoluteFilename[ i ] == '\\' || absoluteFilename[ i - 1 ] == '\\'
+			|| absoluteFilename[ i ] == '/' || absoluteFilename[ i - 1 ] == '/' )
+		{
+			// the whole current directory name is in the file name,
+			// so we just trim off the current directory name to get the
+			// current file name.
+			if( absoluteFilename[ i ] == '\\' || absoluteFilename[ i ] == '/' )
+			{
+				// a directory name might have a trailing slash but a relative
+				// file name should not have a leading one...
+				i++;
+			}
+
+			strncpy( out, &absoluteFilename[ i ], destlen );
+			return;
+		}
+	}
+	// The file is not in a child directory of the current directory, so we
+	// need to step back the appropriate number of parent directories by
+	// using "..\"s.  First find out how many levels deeper we are than the
+	// common directory
+	afMarker = i;
+	levels = 1;
+	// count the number of directory levels we have to go up to get to the
+	// common directory
+	while( i < cdLen )
+	{
+		i++;
+		if( currentDirectory[ i ] == '\\' || currentDirectory[ i ] == '/' )
+		{
+			// make sure it's not a trailing slash
+			i++;
+			if( currentDirectory[ i ] != '\0' )
+			{
+				levels++;
+			}
+		}
+	}
+	// move the absolute filename marker back to the start of the directory name
+	// that it has stopped in.
+	while( afMarker > 0 && absoluteFilename[ afMarker - 1 ] != '\\' && absoluteFilename[ afMarker - 1 ] != '/' )
+	{
+		afMarker--;
+	}
+	// check that the result will not be too long
+	if( levels * 3 + afLen - afMarker > destlen )
+	{
+		return;
+	}
+
+	// add the appropriate number of "..\"s.
+	rfMarker = 0;
+	for( i = 0; i < levels; i++ )
+	{
+		out[ rfMarker++ ] = '.';
+		out[ rfMarker++ ] = '.';
+		out[ rfMarker++ ] = PATH_SEP;
+	}
+
+	// copy the rest of the filename into the result string
+	strcpy( &out[ rfMarker ], &absoluteFilename[ afMarker ] );
 }

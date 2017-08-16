@@ -147,6 +147,8 @@ void Com_EndRedirect (void)
 	rd_flush = NULL;
 }
 
+#ifndef _COM_NOPRINTF
+
 /*
 =============
 Com_Printf
@@ -249,6 +251,8 @@ void QDECL Com_DPrintf( const char *fmt, ...) {
 	Com_Printf ("%s", msg);
 }
 
+#endif
+
 /*
 =============
 Com_Error
@@ -263,9 +267,10 @@ void QDECL Com_Error( int code, const char *fmt, ... ) {
 	static int	errorCount;
 	int			currentTime;
 
+#ifdef _DEBUG
 	*( int * )0 = 0;
-
 	assert( 0 );
+#endif
 
 	Cvar_Set( "com_errorCode", va( "%i", code ) );
 
@@ -549,7 +554,7 @@ Com_StringContains
 ============
 */
 const char *Com_StringContains(const char *str1, const char *str2, int casesensitive) {
-	size_t len;
+	intptr_t len;
 	int i, j;
 
 	len = strlen(str1) - strlen(str2);
@@ -723,6 +728,7 @@ CopyString
 char *CopyString( const char *in ) {
 	char	*out;
 
+#ifndef _DEBUG_MEM
 	if (!in[0]) {
 		return ( char * )Z_EmptyStringPointer();
 	}
@@ -731,6 +737,7 @@ char *CopyString( const char *in ) {
 			return ( char * )Z_NumberStringPointer( *in );
 		}
 	}
+#endif
 
 	out = ( char * )Z_Malloc( strlen( in ) + 1 );
 	strcpy( out, in );
@@ -1603,6 +1610,8 @@ int Com_ModifyMsec( int msec ) {
 	return msec;
 }
 
+qboolean CL_FinishedIntro( void );
+
 /*
 =================
 Com_Frame
@@ -1664,7 +1673,7 @@ void Com_Frame( void ) {
 		msec = com_frameTime - lastTime;
 	} while ( msec < minMsec );
 
-	if( com_dedicated->integer ) //|| CL_FinishedIntro() )
+	if( com_dedicated->integer || CL_FinishedIntro() )
 	{
 		Cbuf_Execute( 0 );
 	}

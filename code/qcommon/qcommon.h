@@ -190,7 +190,7 @@ void		NET_Shutdown( void );
 void		NET_Restart( void );
 void		NET_Config( qboolean enableNetworking );
 void		NET_FlushPacketQueue(void);
-void		NET_SendPacket (netsrc_t sock, int length, const void *data, netadr_t to);
+void		NET_SendPacket (netsrc_t sock, size_t length, const void *data, netadr_t to);
 void		QDECL NET_OutOfBandPrint( netsrc_t net_socket, netadr_t adr, const char *format, ...) __attribute__ ((format (printf, 3, 4)));
 void		QDECL NET_OutOfBandData( netsrc_t sock, netadr_t adr, byte *format, int len );
 
@@ -234,15 +234,15 @@ typedef struct {
 	// outgoing fragment buffer
 	// we need to space out the sending of large fragmented messages
 	qboolean	unsentFragments;
-	int			unsentFragmentStart;
-	int			unsentLength;
+	size_t		unsentFragmentStart;
+	size_t		unsentLength;
 	byte		unsentBuffer[MAX_MSGLEN];
 } netchan_t;
 
 void Netchan_Init( int qport );
 void Netchan_Setup( netsrc_t sock, netchan_t *chan, netadr_t adr, int qport );
 
-void Netchan_Transmit( netchan_t *chan, int length, const byte *data );
+void Netchan_Transmit( netchan_t *chan, size_t length, const byte *data );
 void Netchan_TransmitNextFragment( netchan_t *chan );
 
 qboolean Netchan_Process( netchan_t *chan, msg_t *msg );
@@ -631,6 +631,7 @@ fileHandle_t	FS_FOpenTextFileWrite( const char *qpath );
 // will properly create any needed paths and deal with seperater character issues
 
 int		FS_filelength( fileHandle_t f );
+void	FS_ReplaceSeparators( char *path );
 void	FS_DeleteFile( const char *filename );
 void	FS_CanonicalFilename( char *filename );
 fileHandle_t FS_SV_FOpenFileWrite( const char *filename );
@@ -736,6 +737,8 @@ void FS_Remove( const char *osPath );
 
 void	FS_FilenameCompletion( const char *dir, const char *ext,
 		qboolean stripExt, void(*callback)(const char *s) );
+
+void	FS_GetRelativeFilename( const char *currentDirectory, const char *absoluteFilename, char *out, size_t destlen );
 
 extern char fs_gamedir[];
 extern cvar_t *fs_debug;
@@ -1133,24 +1136,32 @@ temp file loading
 
 const char *Z_EmptyStringPointer( void );
 const char *Z_NumberStringPointer( int iNum );
+
+#ifndef _DEBUG_MEM
 void *Z_TagMalloc( size_t size, int tag );
 void *Z_Malloc( size_t size );
 void Z_Free( void *ptr );
+#endif
+
 void Z_FreeTags( int tag );
+
 void Z_InitMemory( void );
 void Z_Shutdown( void );
 int Z_AvailableMemory( void );
 void Z_LogHeap( void );
 void Z_Meminfo_f( void );
 
+#ifndef _DEBUG_MEM
 void *Hunk_Alloc( size_t size );
+void *Hunk_AllocateTempMemory( size_t size );
+void Hunk_FreeTempMemory( void *buf );
+#endif
+
 void Hunk_Clear( void );
 void Hunk_ClearToMark( void );
 void Hunk_SetMark( void );
 qboolean Hunk_CheckMark( void );
 void Hunk_ClearTempMemory( void );
-void *Hunk_AllocateTempMemory( int size );
-void Hunk_FreeTempMemory( void *buf );
 int	Hunk_MemoryRemaining( void );
 void Hunk_Log( void);
 void Hunk_Trash( void );
@@ -1350,7 +1361,7 @@ cpuFeatures_t Sys_GetProcessorFeatures( void );
 
 void	Sys_SetErrorText( const char *text );
 
-void	Sys_SendPacket( int length, const void *data, netadr_t to );
+void	Sys_SendPacket( size_t length, const void *data, netadr_t to );
 qboolean Sys_GetPacket( netadr_t *net_from, msg_t *net_message );
 
 qboolean	Sys_StringToAdr( const char *s, netadr_t *a );

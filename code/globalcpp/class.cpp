@@ -214,6 +214,7 @@ unsigned int numclassesallocated = 0;
 
 bool classInited = false;
 
+#ifndef _DEBUG_MEM
 void *Class::operator new( size_t s )
 {
 	size_t *p;
@@ -221,7 +222,7 @@ void *Class::operator new( size_t s )
 	if ( s == 0 )
 		return 0;
 
-	s += sizeof( unsigned int );
+	s += sizeof( size_t );
 
 #ifdef GAME_DLL
 	p = ( size_t * )gi.Malloc( s );
@@ -247,7 +248,7 @@ void *Class::operator new( size_t s )
 
 void Class::operator delete( void *ptr )
 {
-	unsigned int *p = ( ( unsigned int * )ptr  ) - 1;
+	size_t *p = ( ( size_t * )ptr  ) - 1;
 
 	totalmemallocated -= *p;
 	numclassesallocated--;
@@ -264,6 +265,8 @@ void Class::operator delete( void *ptr )
 	glbs.Free( p );
 #endif
 }
+
+#endif
 
 Class::Class()
 {
